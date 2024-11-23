@@ -16,6 +16,7 @@ try:
     torch._C._jit_override_can_fuse_on_gpu(False)
     torch._C._jit_set_texpr_fuser_enabled(False)
     torch._C._jit_set_nvfuser_enabled(False)
+    torch._C._jit_set_profiling_mode(False)
 except:
     pass
 
@@ -183,12 +184,22 @@ class Api:
         return self.app.add_api_route(path, endpoint, **kwargs)
 
     def api_save_image(self, file: UploadFile):
-        file_to_write = Path(file.filename)
-        if not file_to_write.is_file():
-            return
-        
+        # Sanitize filename to prevent path traversal
+        safe_filename = Path(file.filename).name  # Get just the filename component
+
+        # Construct the full path within output_dir
+        output_path = self.config.output_dir / safe_filename
+
+        # Ensure output directory exists
+        if not self.config.output_dir or not self.config.output_dir.exists():
+            raise HTTPException(
+                status_code=400,
+                detail="Output directory not configured or doesn't exist",
+            )
+
+        # Read and write the file
         origin_image_bytes = file.file.read()
-        with open(self.config.output_dir / file_to_write.name, "wb") as fw:
+        with open(output_path, "wb") as fw:
             fw.write(origin_image_bytes)
 
     def api_current_model(self) -> ModelInfo:
@@ -241,7 +252,10 @@ class Api:
         )
 
     def api_input_image(self) -> FileResponse:
-        if self.config.input and self.config.input.is_file():
+        if self.config.input is None:
+            raise HTTPException(status_code=200, detail="No input image configured")
+
+        if self.config.input.is_file():
             return FileResponse(self.config.input)
         raise HTTPException(status_code=404, detail="Input image not found")
 
@@ -375,6 +389,7 @@ class Api:
             self.config.interactive_seg_model,
             self.config.interactive_seg_device,
             self.config.enable_remove_bg,
+            self.config.remove_bg_device,
             self.config.remove_bg_model,
             self.config.enable_anime_seg,
             self.config.enable_realesrgan,
